@@ -15,7 +15,6 @@ const client = new Client({
             '--single-process',
             '--disable-gpu'
         ],
-        executablePath: '/nix/store/x205pbkd5xh5g4iv0g58xjla55has3cx-chromium-108.0.5359.94/bin/chromium',
         headless: true
     }
 });
@@ -85,6 +84,11 @@ client.on('button-response', async (buttonResponse) => {
         console.error('Error handling button response:', error);
     }
 });
+
+client.initialize().catch(err => {
+    console.error('Error initializing client:', err);
+});
+
 
 client.initialize().catch(err => {
     console.error('Error initializing client:', err);
