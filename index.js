@@ -12,6 +12,7 @@ app.get('/qr', (req, res) => {
     res.sendFile(path.join(__dirname, 'qrcode.png'));
 });
 
+// Start the Express server
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
@@ -48,6 +49,10 @@ client.on('qr', (qr) => {
 // When the client is ready
 client.on('ready', () => {
     console.log('Client is ready!');
+
+    // Send a welcome message to a predefined number
+    const chatId = '+212708026291'; // ضع الرقم الصحيح هنا
+    client.sendMessage(chatId, 'مرحبًا! أنا البوت الخاص بك.'); // تأكد من استخدام الرقم مع رمز الدولة
 });
 
 // Handle incoming messages and send media and button responses
@@ -55,6 +60,8 @@ const media = MessageMedia.fromFilePath('./trk.png');
 const respondedContacts = new Set();
 
 client.on('message', async (message) => {
+    console.log(`Received message from ${message.from}: ${message.body}`);
+
     const sender = message.from;
 
     if (!respondedContacts.has(sender)) {
@@ -100,7 +107,7 @@ client.on('button-response', async (buttonResponse) => {
     };
 
     try {
-        await client.sendMessage(sender, responses[selectedButtonId] || 'للطلب، يرجى إرسال معلوماتك');
+        await client.sendMessage(sender, responses[selectedButtonId] || 'للطلب، يرجى إرسال معلوماتك.');
     } catch (error) {
         console.error('Error handling button response:', error);
     }
