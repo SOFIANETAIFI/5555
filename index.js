@@ -1,7 +1,22 @@
-// index.js
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
+const fs = require('fs');
+const express = require('express');
+const path = require('path');
 
+// Create an Express server to serve the QR code
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/qr', (req, res) => {
+    res.sendFile(path.join(__dirname, 'qrcode.png'));
+});
+
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
+
+// Initialize the WhatsApp client
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -19,21 +34,25 @@ const client = new Client({
     }
 });
 
-// إعدادات الصورة للمنتج
-const media = MessageMedia.fromFilePath('./trk.png');
-
-// حفظ جهات الاتصال الذين تم الرد عليهم
-const respondedContacts = new Set();
-
-// عرض QR Code عند بدء تشغيل البوت
+// Listen for the QR code and save it as a PNG
 client.on('qr', (qr) => {
-    console.log('QR Code received:');
-    qrcode.generate(qr, { small: true });
+    qrcode.toFile('qrcode.png', qr, (err) => {
+        if (err) {
+            console.error('Error generating QR Code:', err);
+        } else {
+            console.log(`QR Code saved as qrcode.png. You can access it at http://localhost:${port}/qr`);
+        }
+    });
 });
 
+// When the client is ready
 client.on('ready', () => {
     console.log('Client is ready!');
 });
+
+// Handle incoming messages and send media and button responses
+const media = MessageMedia.fromFilePath('./trk.png');
+const respondedContacts = new Set();
 
 client.on('message', async (message) => {
     const sender = message.from;
@@ -42,11 +61,12 @@ client.on('message', async (message) => {
         try {
             respondedContacts.add(sender);
 
-            // إرسال الصورة والوصف
+            // Send the image and description
             await client.sendMessage(sender, media, {
                 caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. سعر المنتج هو 199 درهم. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
             });
 
+            // Send buttons with options
             const buttons = [
                 { buttonId: 'price', buttonText: { displayText: 'سعر المنتج' }, type: 1 },
                 { buttonId: 'delivery', buttonText: { displayText: 'تكلفة التوصيل' }, type: 1 },
@@ -68,6 +88,7 @@ client.on('message', async (message) => {
     }
 });
 
+// Handle button responses
 client.on('button-response', async (buttonResponse) => {
     const sender = buttonResponse.from;
     const selectedButtonId = buttonResponse.selectedButtonId;
@@ -85,11 +106,7 @@ client.on('button-response', async (buttonResponse) => {
     }
 });
 
-client.initialize().catch(err => {
-    console.error('Error initializing client:', err);
-});
-
-
+// Initialize the client
 client.initialize().catch(err => {
     console.error('Error initializing client:', err);
 });
