@@ -1,5 +1,5 @@
 const express = require('express');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { Client, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const http = require('http');
 const path = require('path');
@@ -15,9 +15,6 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './sessions'
-    }),
     puppeteer: {
         headless: true,
         args: [
@@ -30,7 +27,8 @@ const client = new Client({
             '--no-zygote',
             '--single-process',
         ],
-    }
+    },
+    authTimeoutMs: 60000, // 60 seconds for authentication
 });
 
 // Set up media and responded contacts
@@ -112,28 +110,24 @@ client.on('ready', () => {
 client.on('message', async (message) => {
     const sender = message.from;
 
-    // تحقق مما إذا تم الرد على هذا المرسل بالفعل
-    if (respondedContacts.has(sender)) {
-        console.log(`Already responded to ${sender}. Ignoring further messages.`);
-        return; // لا تقم بإرسال الرسالة مرة أخرى
-    }
+    if (!respondedContacts.has(sender)) {
+        try {
+            respondedContacts.add(sender);
 
-    try {
-        respondedContacts.add(sender); // أضف المرسل إلى القائمة
+            // Send product image and description
+            await client.sendMessage(sender, media, {
+                caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. سعر المنتج هو 199 درهم. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
+            });
 
-        // Send product image and description
-        await client.sendMessage(sender, media, {
-            caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. سعر المنتج هو 199 درهم. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
-        });
+            const buttonMessage = {
+                text: 'للمزيد من المعلومات، يرجى إرسال أحد الأرقام التالية:\n1. سعر المنتج\n2. تكلفة التوصيل\n3. جودة المنتج',
+            };
 
-        const buttonMessage = {
-            text: 'للمزيد من المعلومات، يرجى إرسال أحد الأرقام التالية:\n1. سعر المنتج\n2. تكلفة التوصيل\n3. جودة المنتج',
-        };
-
-        await client.sendMessage(sender, buttonMessage);
-    } catch (error) {
-        console.error('Error sending message:', error);
-        await client.sendMessage(sender, 'عذراً، حدث خطأ. للطلب، يرجى إرسال معلوماتك.');
+            await client.sendMessage(sender, buttonMessage);
+        } catch (error) {
+            console.error('Error sending message:', error);
+            await client.sendMessage(sender, 'عذراً، حدث خطأ. للطلب، يرجى إرسال معلوماتك.');
+        }
     }
 });
 
