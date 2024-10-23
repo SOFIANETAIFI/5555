@@ -1,5 +1,5 @@
 const express = require('express');
-const { Client, MessageMedia } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const http = require('http');
 const path = require('path');
@@ -15,6 +15,9 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: './sessions'
+    }),
     puppeteer: {
         headless: true,
         args: [
@@ -27,8 +30,7 @@ const client = new Client({
             '--no-zygote',
             '--single-process',
         ],
-    },
-    authTimeoutMs: 60000, // 60 seconds for authentication
+    }
 });
 
 // Set up media and responded contacts
