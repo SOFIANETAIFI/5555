@@ -14,6 +14,7 @@ let clientReady = false;
 app.use(express.json());
 app.use(express.static('public'));
 
+// Initialize the WhatsApp client
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './sessions'
@@ -34,7 +35,7 @@ const client = new Client({
 });
 
 // Set up media and responded contacts
-const media = MessageMedia.fromFilePath('./trk.png');
+const media = MessageMedia.fromFilePath('./public/trk.png'); // تأكد من أن الصورة في المجلد الصحيح
 const respondedContacts = new Set();
 
 // QR Code endpoint
@@ -118,7 +119,7 @@ client.on('message', async (message) => {
 
             // Send product image and description
             await client.sendMessage(sender, media, {
-                caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. سعر المنتج هو 199 درهم. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
+                caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
             });
 
             const buttonMessage = {
@@ -130,24 +131,21 @@ client.on('message', async (message) => {
             console.error('Error sending message:', error);
             await client.sendMessage(sender, 'عذراً، حدث خطأ. للطلب، يرجى إرسال معلوماتك.');
         }
-    }
-});
+    } else {
+        const responses = {
+            '1': 'سعر المنتج هو 199 درهم.',
+            '2': 'التوصيل مجاني لجميع المناطق 🚚.',
+            '3': 'جودة المنتج عالية جدًا.'
+        };
 
-client.on('message', async (message) => {
-    const sender = message.from;
-    const messageContent = message.body;
+        const messageContent = message.body;
 
-    const responses = {
-        '1': 'سعر المنتج هو 199 درهم.',
-        '2': 'التوصيل مجاني لجميع المناطق 🚚.',
-        '3': 'جودة المنتج عالية جدًا.'
-    };
-
-    if (responses[messageContent]) {
-        try {
-            await client.sendMessage(sender, responses[messageContent]);
-        } catch (error) {
-            console.error('Error handling response:', error);
+        if (responses[messageContent]) {
+            try {
+                await client.sendMessage(sender, responses[messageContent]);
+            } catch (error) {
+                console.error('Error handling response:', error);
+            }
         }
     }
 });
