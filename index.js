@@ -1,188 +1,128 @@
-const express = require('express');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
-const http = require('http');
+// index.js
+const {
+    default: makeWASocket,
+    DisconnectReason,
+    useMultiFileAuthState
+} = require('@whiskeysockets/baileys');
 const path = require('path');
+const fs = require('fs');
+const express = require('express');
 const app = express();
-const server = http.createServer(app);
+const port = process.env.PORT || 3000;
+const P = require('pino');
 
-// Store QR code data
-let qrCodeData = null;
-let clientReady = false;
-
-// Express middleware
-app.use(express.json());
-app.use(express.static('public'));
-
-// Initialize the WhatsApp client
-const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './sessions'
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--disable-gpu',
-            '--no-zygote',
-            '--single-process',
-        ],
-    }
+// Keep service alive
+app.get('/', (req, res) => {
+    res.send('WhatsApp Bot is Running!');
 });
 
-// Set up media and responded contacts
-const media = MessageMedia.fromFilePath('./public/trk.png'); // تأكد من أن الصورة في المجلد الصحيح
-const respondedContacts = new Set();
-
-// QR Code endpoint
-app.get('/qr', async (req, res) => {
-    if (clientReady) {
-        return res.send('WhatsApp client is already ready!');
-    }
-    if (qrCodeData) {
-        res.type('html');
-        res.send(`
-            <html>
-                <head>
-                    <title>WhatsApp QR Code</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body {
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            height: 100vh;
-                            margin: 0;
-                            background-color: #f0f2f5;
-                        }
-                        .container {
-                            text-align: center;
-                            padding: 20px;
-                            background: white;
-                            border-radius: 10px;
-                            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                        }
-                        img {
-                            max-width: 300px;
-                            height: auto;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h2>Scan QR Code to Login</h2>
-                        <img src="${qrCodeData}" alt="WhatsApp QR Code"/>
-                        <p>Status: Waiting for scan...</p>
-                    </div>
-                </body>
-            </html>
-        `);
-    } else {
-        res.send('QR Code not yet generated. Please wait...');
-    }
+app.get('/ping', (req, res) => {
+    res.send('pong');
 });
 
-// Status endpoint
-app.get('/status', (req, res) => {
-    res.json({
-        status: clientReady ? 'ready' : 'waiting',
-        respondedContacts: Array.from(respondedContacts).length
-    });
-});
+// المسار للصورة
+const imagePath = path.join(__dirname, 'trk.png');
 
-// WhatsApp client events
-client.on('qr', async (qr) => {
-    console.log('QR Code received');
-    try {
-        qrCodeData = await qrcode.toDataURL(qr);
-    } catch (err) {
-        console.error('Error generating QR code:', err);
-    }
-});
+// حفظ حالة المستخدمين
+const userStates = new Set();
 
-client.on('ready', () => {
-    console.log('Client is ready!');
-    clientReady = true;
-    qrCodeData = null; // Clear QR code once client is ready
-});
-
-client.on('message', async (message) => {
-    const sender = message.from;
-
-    if (!respondedContacts.has(sender)) {
-        try {
-            respondedContacts.add(sender);
-
-            // Send product image and description
-            await client.sendMessage(sender, media, {
-                caption: 'هالعرض المميز:\n3 تلاتة تريكو وقبية بـ 199 درهم فقط! 🎉\nالتوصيل مجاني لجميع المناطق 🚚. من فضلك أرسل معلوماتك للطلب (الاسم، العنوان، رقم الهاتف، المقاس).'
-            });
-
-            const buttonMessage = {
-                text: 'للمزيد من المعلومات، يرجى إرسال أحد الأرقام التالية:\n1. سعر المنتج\n2. تكلفة التوصيل\n3. جودة المنتج',
-            };
-
-            await client.sendMessage(sender, buttonMessage);
-        } catch (error) {
-            console.error('Error sending message:', error);
-            await client.sendMessage(sender, 'عذراً، حدث خطأ. للطلب، يرجى إرسال معلوماتك.');
-        }
-    } else {
-        const responses = {
-            '1': 'سعر المنتج هو 199 درهم.',
-            '2': 'التوصيل مجاني لجميع المناطق 🚚.',
-            '3': 'جودة المنتج عالية جدًا.'
-        };
-
-        const messageContent = message.body;
-
-        if (responses[messageContent]) {
-            try {
-                await client.sendMessage(sender, responses[messageContent]);
-            } catch (error) {
-                console.error('Error handling response:', error);
-            }
-        }
-    }
-});
-
-// Handle authentication events
-client.on('authenticated', () => {
-    console.log('Client authenticated');
-});
-
-client.on('auth_failure', (error) => {
-    console.error('Authentication failed:', error);
-    qrCodeData = null;
-    clientReady = false;
-});
-
-// Initialize client and start server
-const PORT = process.env.PORT || 3000;
-
-async function startServer() {
-    try {
-        await client.initialize();
-        server.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
-        });
-    } catch (err) {
-        console.error('Error starting server:', err);
-    }
+// تأكد من وجود مجلد auth_info
+if (!fs.existsSync('./auth_info')) {
+    fs.mkdirSync('./auth_info');
 }
 
-startServer();
-
-// Handle process termination
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM received. Cleaning up...');
-    await client.destroy();
-    server.close(() => {
-        console.log('Server closed');
-        process.exit(0);
+// دالة لتشغيل البوت
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info')
+    
+    const sock = makeWASocket({
+        printQRInTerminal: true,
+        auth: state,
+        logger: P({ level: 'silent' })
     });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('اتصال مقطوع بسبب ', lastDisconnect.error, ', جاري إعادة الاتصال:', shouldReconnect);
+            
+            if (shouldReconnect) {
+                connectToWhatsApp();
+            }
+        } else if (connection === 'open') {
+            console.log('تم الاتصال بنجاح!');
+        }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const m = messages[0];
+        
+        if (!m.message) return;
+        const messageType = Object.keys(m.message)[0];
+        
+        let messageText = messageType === 'conversation' ? m.message.conversation :
+            messageType === 'extendedTextMessage' ? m.message.extendedTextMessage.text : '';
+        
+        if (!messageText) return;
+        
+        const chatId = m.key.remoteJid;
+        
+        if (userStates.has(chatId)) return;
+        userStates.add(chatId);
+
+        try {
+            switch(messageText.toLowerCase()) {
+                case 'start':
+                    await sock.sendMessage(chatId, {
+                        image: { url: imagePath },
+                        caption: '*3 تلاتة تريكو وقبية 199 درهم*\n' +
+                                'التوصيل 0 درهم\n' +
+                                'متوفر في S L XL 2XL 3XL\n' +
+                                '♻️لتسجيل طلبكم سريعا♻️\n' +
+                                'اترك رسالتك\n' +
+                                '*بالاسم*             :………………………\n' +
+                                '*رقم الهاتف*    : ………………………\n' +
+                                '*العنوان الكامل* : …………………….\n' +
+                                '*المقاس*           :………………………\n' +
+                                'سيعمل فريقنا على الإتصال بكم وبتوصيل طلبيتكم'
+                    });
+                    break;
+                    
+                case 'help':
+                    await sock.sendMessage(chatId, {
+                        text: 'الأوامر المتاحة:\n' +
+                              '- start: لعرض المنتج وتفاصيل الطلب\n' +
+                              '- help: لعرض قائمة الأوامر'
+                    });
+                    break;
+                    
+                default:
+                    if (!messageText.startsWith('help') && !messageText.startsWith('start')) {
+                        await sock.sendMessage(chatId, {
+                            text: 'عذراً، لا أفهم هذا الأمر. يرجى استخدام "help" لرؤية الأوامر المتاحة.'
+                        });
+                    }
+            }
+        } catch (error) {
+            console.error('خطأ في معالجة الرسالة:', error);
+        } finally {
+            setTimeout(() => {
+                userStates.delete(chatId);
+            }, 60000);
+        }
+    });
+}
+
+app.listen(port, () => {
+    console.log(`الخادم يعمل على المنفذ ${port}`);
+    connectToWhatsApp().catch(err => console.log('خطأ في الاتصال:', err));
+});
+
+// Keep the process alive
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received');
 });
