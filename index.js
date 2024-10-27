@@ -25,7 +25,7 @@ if (!fs.existsSync('./auth_info')) {
 
 // آلية الحفاظ على نشاط التطبيق
 function keepAlive() {
-    const appUrl = process.env.APP_URL || `https://your-app-name.onrender.com`;
+    const appUrl = process.env.APP_URL || `https://five555-3.onrender.com`;
     console.log('Starting keep-alive mechanism...');
     
     setInterval(() => {
