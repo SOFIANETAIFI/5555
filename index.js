@@ -6,7 +6,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
 const https = require('https');
 const app = express();
 const port = process.env.PORT || 3000;
@@ -17,6 +17,10 @@ const imagePath = path.join(__dirname, 'trk.png');
 
 // حفظ حالة المستخدمين
 const userStates = new Set();
+
+// متغير عالمي لتخزين آخر QR code
+let lastQR = '';
+let isConnected = false;
 
 // تأكد من وجود مجلد auth_info
 if (!fs.existsSync('./auth_info')) {
@@ -36,27 +40,39 @@ function keepAlive() {
         }).on('error', (err) => {
             console.error('Keep-alive ping failed:', err);
         });
-    }, 840000); // كل 14 دقيقة
+    }, 840000);
 }
 
-// دالة تحسين عرض QR
-const generateQR = (qr) => {
-    console.clear();
-    console.log('='.repeat(50));
-    console.log('امسح رمز QR باستخدام تطبيق واتساب:');
-    console.log('='.repeat(50));
-    console.log('');
-    
-    qrcode.generate(qr, {
-        small: true,
-        margin: 2,
+// إعداد Express
+app.use(express.static('public'));
+app.set('view engine', 'ejs');
+
+// إنشاء مجلد public إذا لم يكن موجوداً
+if (!fs.existsSync('./public')) {
+    fs.mkdirSync('./public');
+}
+
+// صفحة QR الرئيسية
+app.get('/', (req, res) => {
+    res.render('qr', { 
+        qrCode: lastQR,
+        isConnected: isConnected,
+        botStatus: isConnected ? 'متصل' : 'غير متصل'
     });
-    
-    console.log('');
-    console.log('='.repeat(50));
-    console.log('انتظر حتى يتم الاتصال...');
-    console.log('='.repeat(50));
-};
+});
+
+// مسار للحصول على حالة الاتصال
+app.get('/status', (req, res) => {
+    res.json({ 
+        isConnected: isConnected,
+        status: isConnected ? 'متصل' : 'غير متصل'
+    });
+});
+
+// مسار للتأكد من أن البوت يعمل
+app.get('/ping', (req, res) => {
+    res.send('pong');
+});
 
 // متغيرات تتبع إعادة الاتصال
 let connectionRetryCount = 0;
@@ -68,26 +84,34 @@ async function connectToWhatsApp() {
         const { state, saveCreds } = await useMultiFileAuthState('auth_info')
         
         const sock = makeWASocket({
-            printQRInTerminal: false, // تعطيل الطباعة التلقائية للـ QR
+            printQRInTerminal: false,
             auth: state,
             logger: P({ level: 'silent' }),
-            qrTimeout: 40000,
-            connectTimeout: 30000,
+            qrTimeout: 60000,
+            connectTimeout: 60000,
             defaultQueryTimeoutMs: 60000
         });
 
         sock.ev.on('creds.update', saveCreds);
 
-        sock.ev.on('connection.update', (update) => {
+        sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
             if (qr) {
-                generateQR(qr);
+                try {
+                    // تحويل QR إلى صورة وحفظها
+                    lastQR = await qrcode.toDataURL(qr);
+                    isConnected = false;
+                    console.log('New QR Code generated - Check the web interface');
+                } catch (err) {
+                    console.error('Error generating QR code:', err);
+                }
             }
             
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                isConnected = false;
                 
                 console.log('انقطع الاتصال بسبب:', lastDisconnect?.error);
                 
@@ -101,11 +125,10 @@ async function connectToWhatsApp() {
                     console.log('\nتم الوصول للحد الأقصى من محاولات إعادة الاتصال. يرجى التحقق من اتصالك.');
                 }
             } else if (connection === 'open') {
-                console.clear();
-                console.log('='.repeat(50));
                 console.log('تم الاتصال بنجاح! البوت جاهز للعمل');
-                console.log('='.repeat(50));
+                isConnected = true;
                 connectionRetryCount = 0;
+                lastQR = ''; // مسح QR بعد الاتصال
             }
         });
 
@@ -145,9 +168,14 @@ async function connectToWhatsApp() {
                         
                     case 'help':
                         await sock.sendMessage(chatId, {
-                            text: 'الأوامر المتاحة:\n' +
-                                  '- start: لعرض المنتج وتفاصيل الطلب\n' +
-                                  '- help: لعرض قائمة الأوامر'
+                            text: '*3 تلاتة تريكو وقبية 199 درهم*:\n' +
+                                '♻️لتسجيل طلبكم سريعا♻️\n' +
+                                    'اترك رسالتك\n' +
+                                    '*بالاسم*             :………………………\n' +
+                                    '*رقم الهاتف*    : ………………………\n' +
+                                    '*العنوان الكامل* : …………………….\n' +
+                                    '*المقاس*           :………………………\n' +
+                                    'سيعمل فريقنا على الإتصال بكم وبتوصيل طلبيتكم'
                         });
                         break;
                         
@@ -175,21 +203,10 @@ async function connectToWhatsApp() {
     }
 }
 
-// إعداد routes الخادم
-app.get('/', (req, res) => {
-    res.send('WhatsApp Bot is Running!');
-});
-
-app.get('/ping', (req, res) => {
-    res.send('pong');
-});
-
 // بدء الخادم
 const server = app.listen(port, () => {
     console.log(`الخادم يعمل على المنفذ ${port}`);
-    // بدء آلية الحفاظ على النشاط
     keepAlive();
-    // بدء اتصال الواتساب
     connectToWhatsApp().catch(err => {
         console.error('خطأ في الاتصال الأولي:', err);
         setTimeout(() => connectToWhatsApp(), 10000);
