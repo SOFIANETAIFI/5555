@@ -27,30 +27,9 @@ if (!fs.existsSync('./auth_info')) {
     fs.mkdirSync('./auth_info');
 }
 
-// آلية الحفاظ على نشاط التطبيق
-function keepAlive() {
-    const appUrl = process.env.APP_URL || `https://five555-3.onrender.com`;
-    console.log('Starting keep-alive mechanism...');
-    
-    setInterval(() => {
-        https.get(appUrl, (resp) => {
-            if (resp.statusCode === 200) {
-                console.log('Keep-alive ping successful');
-            }
-        }).on('error', (err) => {
-            console.error('Keep-alive ping failed:', err);
-        });
-    }, 840000);
-}
-
 // إعداد Express
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
-
-// إنشاء مجلد public إذا لم يكن موجوداً
-if (!fs.existsSync('./public')) {
-    fs.mkdirSync('./public');
-}
 
 // صفحة QR الرئيسية
 app.get('/', (req, res) => {
@@ -58,14 +37,6 @@ app.get('/', (req, res) => {
         qrCode: lastQR,
         isConnected: isConnected,
         botStatus: isConnected ? 'متصل' : 'غير متصل'
-    });
-});
-
-// مسار للحصول على حالة الاتصال
-app.get('/status', (req, res) => {
-    res.json({ 
-        isConnected: isConnected,
-        status: isConnected ? 'متصل' : 'غير متصل'
     });
 });
 
@@ -98,14 +69,9 @@ async function connectToWhatsApp() {
             const { connection, lastDisconnect, qr } = update;
             
             if (qr) {
-                try {
-                    // تحويل QR إلى صورة وحفظها
-                    lastQR = await qrcode.toDataURL(qr);
-                    isConnected = false;
-                    console.log('New QR Code generated - Check the web interface');
-                } catch (err) {
-                    console.error('Error generating QR code:', err);
-                }
+                lastQR = await qrcode.toDataURL(qr);
+                isConnected = false;
+                console.log('New QR Code generated - Check the web interface');
             }
             
             if (connection === 'close') {
@@ -113,19 +79,11 @@ async function connectToWhatsApp() {
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 isConnected = false;
                 
-                console.log('انقطع الاتصال بسبب:', lastDisconnect?.error);
-                
                 if (shouldReconnect && connectionRetryCount < MAX_RETRIES) {
                     connectionRetryCount++;
-                    console.log(`\nمحاولة إعادة الاتصال ${connectionRetryCount} من ${MAX_RETRIES}`);
-                    setTimeout(() => {
-                        connectToWhatsApp();
-                    }, 5000 * connectionRetryCount);
-                } else if (connectionRetryCount >= MAX_RETRIES) {
-                    console.log('\nتم الوصول للحد الأقصى من محاولات إعادة الاتصال. يرجى التحقق من اتصالك.');
+                    setTimeout(connectToWhatsApp, 5000 * connectionRetryCount);
                 }
             } else if (connection === 'open') {
-                console.log('تم الاتصال بنجاح! البوت جاهز للعمل');
                 isConnected = true;
                 connectionRetryCount = 0;
                 lastQR = ''; // مسح QR بعد الاتصال
@@ -136,69 +94,47 @@ async function connectToWhatsApp() {
             const m = messages[0];
             
             if (!m.message) return;
-            const messageType = Object.keys(m.message)[0];
-            
-            let messageText = messageType === 'conversation' ? m.message.conversation :
-                messageType === 'extendedTextMessage' ? m.message.extendedTextMessage.text : '';
-            
-            if (!messageText) return;
-            
+
             const chatId = m.key.remoteJid;
-            
+
+            // تحقق إذا تم مراسلة هذا المستخدم مسبقاً
             if (userStates.has(chatId)) return;
+
+            // إضافة المراسل إلى قائمة المستخدمين لمنع تكرار المراسلة
             userStates.add(chatId);
 
             try {
-                switch(messageText.toLowerCase()) {
-                    case 'start':
-                        await sock.sendMessage(chatId, {
-                            image: { url: imagePath },
-                            caption: '*3 تلاتة تريكو وقبية 199 درهم*\n' +
-                                    'التوصيل 0 درهم\n' +
-                                    'متوفر في S L XL 2XL 3XL\n' +
-                                    '♻️لتسجيل طلبكم سريعا♻️\n' +
-                                    'اترك رسالتك\n' +
-                                    '*بالاسم*             :………………………\n' +
-                                    '*رقم الهاتف*    : ………………………\n' +
-                                    '*العنوان الكامل* : …………………….\n' +
-                                    '*المقاس*           :………………………\n' +
-                                    'سيعمل فريقنا على الإتصال بكم وبتوصيل طلبيتكم'
-                        });
-                        break;
-                        
-                    case 'help':
-                        await sock.sendMessage(chatId, {
-                            text: '*3 تلاتة تريكو وقبية 199 درهم*:\n' +
-                                '♻️لتسجيل طلبكم سريعا♻️\n' +
-                                    'اترك رسالتك\n' +
-                                    '*بالاسم*             :………………………\n' +
-                                    '*رقم الهاتف*    : ………………………\n' +
-                                    '*العنوان الكامل* : …………………….\n' +
-                                    '*المقاس*           :………………………\n' +
-                                    'سيعمل فريقنا على الإتصال بكم وبتوصيل طلبيتكم'
-                        });
-                        break;
-                        
-                    default:
-                        if (!messageText.startsWith('help') && !messageText.startsWith('start')) {
-                            await sock.sendMessage(chatId, {
-                                text: '♻️لتسجيل طلبكم سريعا♻️'
-                            });
-                        }
-                }
+                // إرسال الرسالة الترحيبية مع الصورة
+                await sock.sendMessage(chatId, {
+                    image: { url: imagePath },
+                    caption: '*3 تلاتة تريكو وقبية 199 درهم*\n' +
+                            'التوصيل 0 درهم\n' +
+                            'متوفر في S L XL 2XL 3XL\n' +
+                            '♻️لتسجيل طلبكم سريعا♻️\n' +
+                            'اترك رسالتك\n' +
+                            '*بالاسم*             :………………………\n' +
+                            '*رقم الهاتف*    : ………………………\n' +
+                            '*العنوان الكامل* : …………………….\n' +
+                            '*المقاس*           :………………………\n' +
+                            'سيعمل فريقنا على الإتصال بكم وبتوصيل طلبيتكم'
+                });
+
+                // إرسال تذكير بعد 30 ثانية
+                setTimeout(async () => {
+                    await sock.sendMessage(chatId, {
+                        text: 'برجاء تقديم المعلومات اللازمة *بالاسم*، *رقم الهاتف*، و*العنوان الكامل* لتتم معالجة طلبكم بنجاح. شكرا!'
+                    });
+                }, 30000);
+
             } catch (error) {
                 console.error('خطأ في معالجة الرسالة:', error);
-            } finally {
-                setTimeout(() => {
-                    userStates.delete(chatId);
-                }, 60000);
             }
         });
 
     } catch (err) {
-        console.error('♻️لتسجيل طلبكم سريعا♻️:', err);
+        console.error('♻️خطأ في الاتصال:', err);
         if (connectionRetryCount < MAX_RETRIES) {
-            setTimeout(() => connectToWhatsApp(), 10000);
+            setTimeout(connectToWhatsApp, 10000);
         }
     }
 }
@@ -206,10 +142,9 @@ async function connectToWhatsApp() {
 // بدء الخادم
 const server = app.listen(port, () => {
     console.log(`الخادم يعمل على المنفذ ${port}`);
-    keepAlive();
     connectToWhatsApp().catch(err => {
         console.error('خطأ في الاتصال الأولي:', err);
-        setTimeout(() => connectToWhatsApp(), 10000);
+        setTimeout(connectToWhatsApp, 10000);
     });
 });
 
